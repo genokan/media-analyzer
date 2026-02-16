@@ -18,36 +18,13 @@ A web-based media file analyzer that scans your video, audio, and VR media libra
 
 ### Docker Compose (Recommended)
 
-1. Create a `config.yaml`:
+1. Copy the example config and edit it with your media directories:
 
-```yaml
-scan_dirs:
-  - /data/movies
-  - /data/music
-  - /data/vr
-
-server:
-  host: "0.0.0.0"
-  port: 8080
+```bash
+cp config.yaml.example config.yaml
 ```
 
-2. Create a `docker-compose.yml`:
-
-```yaml
-name: media-analyzer
-
-services:
-  app:
-    container_name: media-analyzer
-    build: .
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./data:/app/data
-      - ./config.yaml:/app/config.yaml
-      - /path/to/your/media:/data:ro
-    restart: unless-stopped
-```
+2. Edit `docker-compose.yml` to mount your media directories as read-only volumes.
 
 3. Start it up:
 
