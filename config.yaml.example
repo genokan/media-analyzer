@@ -1,0 +1,40 @@
+# Media Analyzer Configuration
+# Copy this file to config.yaml and adjust to your setup.
+
+# Directories to scan for media files
+scan_dirs:
+  - /data/movies
+  - /data/music
+  - /data/vr
+
+# Web server settings
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+# Database path (relative to working directory)
+db_path: data/media_analyzer.db
+
+# Optional: set a secret token to require authentication
+# secret_token: your-secret-token-here
+
+# File extensions to scan
+file_extensions:
+  video:
+    - .mp4
+    - .mkv
+    - .avi
+    - .mov
+    - .m4v
+    - .webm
+    - .wmv
+    - .flv
+  audio:
+    - .mp3
+    - .flac
+    - .wav
+    - .ogg
+    - .m4a
+    - .wma
+    - .aac
+    - .opus

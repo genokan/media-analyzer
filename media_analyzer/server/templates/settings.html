@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}Settings - Media Analyzer{% endblock %}
+{% block content %}
+<h2 style="margin-bottom: 16px;">Settings</h2>
+
+<!-- Scan Directories -->
+<div class="card">
+    <h3 class="mb-2">Scan Directories</h3>
+    <p class="text-sm text-muted mb-2">Absolute paths to directories containing media files.</p>
+    <div id="dir-list"></div>
+    <div class="flex gap-2 mt-2">
+        <input type="text" id="new-dir" placeholder="/path/to/media" style="flex:1">
+        <button onclick="addDir()">Add</button>
+        <button onclick="openBrowser()">Browse</button>
+    </div>
+    <span id="dir-add-status" class="text-sm" style="color:#3fb950; margin-top:4px; display:none;"></span>
+    <!-- Directory Browser Panel -->
+    <div id="dir-browser" class="hidden" style="margin-top:12px; border:1px solid #30363d; border-radius:6px; padding:12px;">
+        <div class="flex items-center gap-2 mb-2">
+            <strong class="text-sm">Browse:</strong>
+            <span id="browser-breadcrumb" class="text-sm" style="flex:1"></span>
+            <button onclick="closeBrowser()" style="padding:2px 8px; font-size:12px;">Cancel</button>
+        </div>
+        <div id="browser-dirs" style="max-height:250px; overflow-y:auto; border:1px solid #21262d; border-radius:4px;"></div>
+        <button onclick="selectBrowserDir()" style="margin-top:8px;">Select This Directory</button>
+    </div>
+</div>
+
+<!-- File Extensions -->
+<div class="card">
+    <h3 class="mb-2">File Extensions</h3>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+        <div>
+            <h4 class="text-sm text-muted mb-2">Video Extensions</h4>
+            <div id="video-exts"></div>
+        </div>
+        <div>
+            <h4 class="text-sm text-muted mb-2">Audio Extensions</h4>
+            <div id="audio-exts"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Server Settings -->
+<div class="card">
+    <h3 class="mb-2">Server</h3>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+        <div>
+            <label class="text-sm text-muted">Bind Host</label>
+            <input type="text" id="cfg-host" style="width:100%; margin-top:4px">
+        </div>
+        <div>
+            <label class="text-sm text-muted">Port</label>
+            <input type="text" id="cfg-port" style="width:100%; margin-top:4px">
+        </div>
+    </div>
+    <p class="text-sm text-muted mt-2">Changes take effect after restart.</p>
+</div>
+
+<!-- Token -->
+<div class="card">
+    <h3 class="mb-2">API Token</h3>
+    <div id="token-status" class="text-sm"></div>
+</div>
+
+<button onclick="saveConfig()" style="margin-top:8px">Save Settings</button>
+<span id="save-status" class="text-sm text-muted" style="margin-left:12px"></span>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let config = {};
+
+async function loadConfig() {
+    const res = await fetch('/api/config');
+    config = await res.json();
+    renderConfig();
+}
+
+function renderConfig() {
+    // Directories
+    const dirList = document.getElementById('dir-list');
+    dirList.replaceChildren();
+    (config.scan_dirs || []).forEach((d, i) => {
+        const row = document.createElement('div');
+        row.className = 'flex gap-2 items-center mb-2';
+        const span = document.createElement('span');
+        span.textContent = d;
+        span.style.flex = '1';
+        const btn = document.createElement('button');
+        btn.className = 'btn-danger';
+        btn.textContent = 'Remove';
+        btn.style.padding = '4px 8px';
+        btn.style.fontSize = '12px';
+        btn.onclick = async () => { config.scan_dirs.splice(i, 1); renderConfig(); await saveDirs(); showDirAddStatus('Directory removed'); };
+        row.appendChild(span);
+        row.appendChild(btn);
+        dirList.appendChild(row);
+    });
+
+    // Extensions
+    renderExtList('video-exts', config.file_extensions?.video || []);
+    renderExtList('audio-exts', config.file_extensions?.audio || []);
+
+    // Server
+    document.getElementById('cfg-host').value = config.server?.host || '127.0.0.1';
+    document.getElementById('cfg-port').value = config.server?.port || 8080;
+
+    // Token
+    document.getElementById('token-status').textContent =
+        config.has_secret_token ? 'API token is configured.' : 'No API token set (localhost-only mode).';
+}
+
+function renderExtList(containerId, exts) {
+    const container = document.getElementById(containerId);
+    container.replaceChildren();
+    exts.forEach(ext => {
+        const span = document.createElement('span');
+        span.className = 'badge';
+        span.style.margin = '2px';
+        span.style.background = '#21262d';
+        span.textContent = ext;
+        container.appendChild(span);
+    });
+}
+
+async function addDir() {
+    const input = document.getElementById('new-dir');
+    const val = input.value.trim();
+    if (!val) return;
+    if (!val.startsWith('/')) {
+        alert('Path must be absolute (start with /)');
+        return;
+    }
+    if (!config.scan_dirs) config.scan_dirs = [];
+    config.scan_dirs.push(val);
+    input.value = '';
+    renderConfig();
+    await saveDirs();
+    showDirAddStatus('Directory added');
+}
+
+function showDirAddStatus(msg) {
+    const el = document.getElementById('dir-add-status');
+    el.textContent = msg;
+    el.style.display = 'inline';
+    setTimeout(() => { el.style.display = 'none'; }, 2000);
+}
+
+let browserPath = '/';
+
+function openBrowser() {
+    browserPath = '/';
+    document.getElementById('dir-browser').classList.remove('hidden');
+    loadBrowser(browserPath);
+}
+
+function closeBrowser() {
+    document.getElementById('dir-browser').classList.add('hidden');
+}
+
+async function loadBrowser(path) {
+    browserPath = path;
+    renderBreadcrumb(path);
+    const dirsEl = document.getElementById('browser-dirs');
+    dirsEl.replaceChildren();
+    try {
+        const res = await fetch('/api/browse?path=' + encodeURIComponent(path));
+        if (!res.ok) {
+            const err = await res.json();
+            dirsEl.textContent = err.error || 'Failed to browse';
+            return;
+        }
+        const data = await res.json();
+        if (data.directories.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'text-sm text-muted';
+            empty.style.padding = '8px';
+            empty.textContent = 'No subdirectories';
+            dirsEl.appendChild(empty);
+            return;
+        }
+        data.directories.forEach(name => {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding:6px 10px; cursor:pointer; border-bottom:1px solid #21262d;';
+            item.textContent = name;
+            item.onmouseenter = () => item.style.background = '#21262d';
+            item.onmouseleave = () => item.style.background = '';
+            item.onclick = () => {
+                const next = browserPath === '/' ? '/' + name : browserPath + '/' + name;
+                loadBrowser(next);
+            };
+            dirsEl.appendChild(item);
+        });
+    } catch(e) {
+        dirsEl.textContent = 'Error loading directory';
+    }
+}
+
+function renderBreadcrumb(path) {
+    const el = document.getElementById('browser-breadcrumb');
+    el.replaceChildren();
+    const parts = path.split('/').filter(Boolean);
+    const rootLink = document.createElement('a');
+    rootLink.href = '#';
+    rootLink.textContent = '/';
+    rootLink.style.color = '#58a6ff';
+    rootLink.onclick = (e) => { e.preventDefault(); loadBrowser('/'); };
+    el.appendChild(rootLink);
+
+    let accumulated = '';
+    parts.forEach((part, i) => {
+        accumulated += '/' + part;
+        el.appendChild(document.createTextNode(' / '));
+        if (i < parts.length - 1) {
+            const link = document.createElement('a');
+            link.href = '#';
+            link.textContent = part;
+            link.style.color = '#58a6ff';
+            const target = accumulated;
+            link.onclick = (e) => { e.preventDefault(); loadBrowser(target); };
+            el.appendChild(link);
+        } else {
+            const span = document.createElement('span');
+            span.textContent = part;
+            el.appendChild(span);
+        }
+    });
+}
+
+async function selectBrowserDir() {
+    if (!config.scan_dirs) config.scan_dirs = [];
+    if (config.scan_dirs.includes(browserPath)) {
+        showDirAddStatus('Directory already in list');
+    } else {
+        config.scan_dirs.push(browserPath);
+        renderConfig();
+        await saveDirs();
+        showDirAddStatus('Directory added');
+    }
+    closeBrowser();
+}
+
+async function saveDirs() {
+    try {
+        await fetch('/api/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scan_dirs: config.scan_dirs }),
+        });
+    } catch(e) {
+        console.error('Failed to save directories', e);
+    }
+}
+
+async function saveConfig() {
+    const payload = {
+        scan_dirs: config.scan_dirs,
+        file_extensions: config.file_extensions,
+        server: {
+            host: document.getElementById('cfg-host').value,
+            port: parseInt(document.getElementById('cfg-port').value) || 8080,
+        },
+    };
+    try {
+        const res = await fetch('/api/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        const status = document.getElementById('save-status');
+        if (data.warnings && data.warnings.length) {
+            status.textContent = 'Saved with warnings: ' + data.warnings.join('; ');
+        } else {
+            status.textContent = 'Saved!';
+        }
+        setTimeout(() => { status.textContent = ''; }, 3000);
+    } catch(e) {
+        alert('Failed to save: ' + e.message);
+    }
+}
+
+// Active nav
+document.getElementById('nav-settings').classList.add('active');
+
+loadConfig();
+</script>
+{% endblock %}

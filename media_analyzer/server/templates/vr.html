@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}VR Videos - Media Analyzer{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:16px;">VR Videos</h2>
+
+<!-- Toolbar -->
+<div class="toolbar">
+    <input type="text" id="search" placeholder="Search filename..." style="flex:1; min-width:200px">
+    <select id="filter-codec">
+        <option value="">All Codecs</option>
+        <option value="h264">H.264</option>
+        <option value="hevc">HEVC/H.265</option>
+        <option value="av1">AV1</option>
+        <option value="vp9">VP9</option>
+    </select>
+    <select id="filter-resolution">
+        <option value="">All Resolutions</option>
+        <option value="8K">8K</option>
+        <option value="5.7K">5.7K</option>
+        <option value="4K">4K</option>
+        <option value="1440p">1440p</option>
+        <option value="1080p">1080p</option>
+        <option value="720p">720p</option>
+    </select>
+    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap;">
+        <input type="checkbox" id="group-resolution"> Group by res
+    </label>
+    <div class="col-toggle">
+        <button class="btn-secondary" id="btn-columns" type="button">Columns</button>
+        <div class="col-toggle-menu" id="col-menu"></div>
+    </div>
+</div>
+
+<!-- Files table -->
+<div class="card" style="padding:0;">
+    <table id="files-table">
+        <thead>
+            <tr id="header-row"></tr>
+        </thead>
+        <tbody id="files-body"></tbody>
+    </table>
+</div>
+
+<div class="pagination" id="pagination"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const COLUMNS = [
+    { key: 'filename',      label: 'Filename',     sort: 'filename',  default: true },
+    { key: 'total_res',     label: 'Total Res',    sort: null,        default: true },
+    { key: 'per_eye_res',   label: 'Per-Eye Res',  sort: null,        default: true },
+    { key: 'vr_format',     label: 'VR Format',    sort: null,        default: true },
+    { key: 'stereo',        label: 'Stereo',       sort: null,        default: false },
+    { key: 'projection',    label: 'Projection',   sort: null,        default: true },
+    { key: 'spherical',     label: 'Spherical',    sort: null,        default: false },
+    { key: 'fov',           label: 'FOV',          sort: null,        default: true },
+    { key: 'completeness',  label: 'Metadata (%)', sort: null,        default: true },
+    { key: 'duration',      label: 'Duration',     sort: 'duration',  default: true },
+    { key: 'file_size',     label: 'Size',         sort: 'file_size', default: true },
+];
+
+const STORAGE_KEY = 'media-analyzer-vr-cols';
+let visibleCols = loadColumnPrefs();
+
+function loadColumnPrefs() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return COLUMNS.filter(c => c.default).map(c => c.key);
+}
+function saveColumnPrefs() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(visibleCols));
+}
+
+const state = {
+    page: 1, perPage: 50, sort: 'filename', order: 'asc',
+    search: '', codec: '', resolutionLabel: '', groupByResolution: false,
+};
+
+function formatDuration(sec) {
+    if (!sec) return '-';
+    const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = Math.floor(sec%60);
+    return h > 0 ? h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0') : m+':'+String(s).padStart(2,'0');
+}
+function formatSize(b) { if (!b) return '-'; if (b>=1e9) return (b/1e9).toFixed(1)+' GB'; if (b>=1e6) return (b/1e6).toFixed(1)+' MB'; return (b/1e3).toFixed(0)+' KB'; }
+
+function getVisibleColumns() { return COLUMNS.filter(c => visibleCols.includes(c.key)); }
+
+function renderHeader() {
+    const row = document.getElementById('header-row');
+    row.replaceChildren();
+    getVisibleColumns().forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col.label;
+        if (col.sort) {
+            th.dataset.sort = col.sort;
+            if (state.sort === col.sort) th.classList.add('sorted');
+            th.onclick = () => {
+                if (state.sort === col.sort) { state.order = state.order === 'asc' ? 'desc' : 'asc'; }
+                else { state.sort = col.sort; state.order = 'asc'; }
+                document.querySelectorAll('th').forEach(h => h.classList.remove('sorted'));
+                th.classList.add('sorted');
+                state.page = 1;
+                fetchFiles();
+            };
+        }
+        row.appendChild(th);
+    });
+}
+
+function buildColumnMenu() {
+    const menu = document.getElementById('col-menu');
+    menu.replaceChildren();
+    COLUMNS.forEach(col => {
+        const label = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = visibleCols.includes(col.key);
+        cb.onchange = () => {
+            if (cb.checked) { visibleCols.push(col.key); }
+            else { visibleCols = visibleCols.filter(k => k !== col.key); }
+            saveColumnPrefs();
+            renderHeader();
+            fetchFiles();
+        };
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(col.label));
+        menu.appendChild(label);
+    });
+}
+
+function cellValue(f, key) {
+    switch(key) {
+        case 'filename':     return { text: f.filename, title: f.file_path };
+        case 'total_res': {
+            let r = '-';
+            if (f.width && f.height) { r = f.width + 'x' + f.height; if (f.resolution_label) r += ' (' + f.resolution_label + ')'; }
+            return { text: r };
+        }
+        case 'per_eye_res': {
+            let r = '-';
+            if (f.per_eye_width && f.per_eye_height) r = f.per_eye_width + 'x' + f.per_eye_height;
+            return { text: r };
+        }
+        case 'vr_format':    return { text: f.vr_format || '-' };
+        case 'stereo':       return { text: f.stereo_mode || '-' };
+        case 'projection':   return { text: f.projection_type || '-' };
+        case 'spherical':    return { text: f.spherical ? 'Yes' : 'No' };
+        case 'fov':          return { text: f.fov || '-' };
+        case 'completeness': return { text: f.metadata_completeness != null ? f.metadata_completeness + '%' : '-' };
+        case 'duration':     return { text: formatDuration(f.duration) };
+        case 'file_size':    return { text: formatSize(f.file_size) };
+        default:             return { text: '-' };
+    }
+}
+
+async function fetchFiles() {
+    const params = new URLSearchParams({
+        page: state.page, per_page: state.perPage,
+        sort: state.sort, order: state.order, media_type: 'vr',
+    });
+    if (state.search) params.set('search', state.search);
+    if (state.codec) params.set('codec', state.codec);
+    if (state.resolutionLabel) params.set('resolution_label', state.resolutionLabel);
+    try {
+        const res = await fetch('/api/files?' + params);
+        const data = await res.json();
+        renderFiles(data);
+    } catch(e) { console.error('Failed to fetch files', e); }
+}
+
+function buildFileRow(f) {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => toggleDetail(f.id, tr);
+    const cols = getVisibleColumns();
+    cols.forEach(col => {
+        const val = cellValue(f, col.key);
+        const td = document.createElement('td');
+        td.textContent = val.text;
+        td.title = val.title || val.text;
+        tr.appendChild(td);
+    });
+    return tr;
+}
+
+function renderFiles(data) {
+    const tbody = document.getElementById('files-body');
+    tbody.replaceChildren();
+    const colCount = getVisibleColumns().length;
+
+    if (state.groupByResolution) {
+        const groups = {};
+        data.files.forEach(f => {
+            const key = f.resolution_label || 'Unknown';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(f);
+        });
+        const order = ['8K', '5.7K', '4K', '1440p', '1080p', '720p', '480p', 'Unknown'];
+        const sortedKeys = Object.keys(groups).sort((a, b) => {
+            const ai = order.indexOf(a), bi = order.indexOf(b);
+            return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+        });
+        sortedKeys.forEach(key => {
+            const headerTr = document.createElement('tr');
+            const headerTd = document.createElement('td');
+            headerTd.colSpan = colCount;
+            headerTd.style.cssText = 'background:#21262d; font-weight:bold; padding:8px 12px;';
+            headerTd.textContent = key + ' (' + groups[key].length + ')';
+            headerTr.appendChild(headerTd);
+            tbody.appendChild(headerTr);
+            groups[key].forEach(f => tbody.appendChild(buildFileRow(f)));
+        });
+        renderPagination(data);
+        return;
+    }
+
+    data.files.forEach(f => tbody.appendChild(buildFileRow(f)));
+    renderPagination(data);
+}
+
+async function toggleDetail(fileId, tr) {
+    const nextRow = tr.nextElementSibling;
+    if (nextRow && nextRow.classList.contains('detail-row')) { nextRow.classList.toggle('open'); return; }
+    try {
+        const res = await fetch('/api/files/' + fileId);
+        const f = await res.json();
+        const detailTr = document.createElement('tr');
+        detailTr.className = 'detail-row open';
+        const td = document.createElement('td');
+        td.colSpan = getVisibleColumns().length;
+        const content = document.createElement('div');
+        content.className = 'detail-content';
+        const dl = document.createElement('dl');
+        dl.className = 'detail-grid';
+        Object.entries(f).forEach(([k, v]) => {
+            if (v == null || k === 'id' || k === 'file_id') return;
+            const dt = document.createElement('dt'); dt.textContent = k;
+            const dd = document.createElement('dd'); dd.textContent = String(v);
+            dl.appendChild(dt); dl.appendChild(dd);
+        });
+        content.appendChild(dl); td.appendChild(content); detailTr.appendChild(td);
+        tr.after(detailTr);
+    } catch(e) { console.error('Detail fetch failed', e); }
+}
+
+function renderPagination(data) {
+    const div = document.getElementById('pagination');
+    div.replaceChildren();
+    if (data.pages <= 1) return;
+    for (let i = 1; i <= data.pages; i++) {
+        if (data.pages > 10 && Math.abs(i - data.page) > 3 && i !== 1 && i !== data.pages) {
+            if (Math.abs(i - data.page) === 4) { const s = document.createElement('span'); s.textContent = '...'; s.style.padding = '8px'; div.appendChild(s); }
+            continue;
+        }
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        if (i === data.page) btn.classList.add('active');
+        btn.onclick = () => { state.page = i; fetchFiles(); };
+        div.appendChild(btn);
+    }
+}
+
+// Filters
+let searchTimeout;
+document.getElementById('search').addEventListener('input', e => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => { state.search = e.target.value; state.page = 1; fetchFiles(); }, 300);
+});
+document.getElementById('filter-codec').addEventListener('change', e => { state.codec = e.target.value; state.page = 1; fetchFiles(); });
+document.getElementById('filter-resolution').addEventListener('change', e => { state.resolutionLabel = e.target.value; state.page = 1; fetchFiles(); });
+document.getElementById('group-resolution').addEventListener('change', e => { state.groupByResolution = e.target.checked; fetchFiles(); });
+
+// Column toggle
+document.getElementById('btn-columns').onclick = () => document.getElementById('col-menu').classList.toggle('open');
+document.addEventListener('click', e => {
+    const toggle = document.querySelector('.col-toggle');
+    if (!toggle.contains(e.target)) document.getElementById('col-menu').classList.remove('open');
+});
+
+document.getElementById('nav-vr').classList.add('active');
+buildColumnMenu();
+renderHeader();
+fetchFiles();
+</script>
+{% endblock %}

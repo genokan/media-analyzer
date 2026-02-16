@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Media Analyzer{% endblock %}
+{% block content %}
+<!-- Stats -->
+<div class="stats-grid" id="stats-grid">
+    <div class="stat-card"><div class="value" id="stat-total">-</div><div class="label">Total Files</div></div>
+    <a href="/videos" class="stat-card" style="text-decoration:none; color:inherit;"><div class="value" id="stat-video">-</div><div class="label">Videos</div></a>
+    <a href="/vr" class="stat-card" style="text-decoration:none; color:inherit;"><div class="value" id="stat-vr">-</div><div class="label">VR Videos</div></a>
+    <a href="/audio" class="stat-card" style="text-decoration:none; color:inherit;"><div class="value" id="stat-audio">-</div><div class="label">Audio Files</div></a>
+</div>
+
+<!-- Scan progress -->
+<div class="card hidden" id="scan-progress">
+    <div class="flex items-center gap-2">
+        <strong>Scanning...</strong>
+        <span id="scan-file" class="text-muted text-sm"></span>
+        <button id="btn-stop-scan" onclick="stopScan()" style="margin-left:auto" class="btn-danger">Stop Scan</button>
+    </div>
+    <div class="progress-bar mt-2">
+        <div class="fill" id="scan-bar" style="width: 0%"></div>
+    </div>
+    <div class="text-sm text-muted mt-2" id="scan-detail"></div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+    <input type="text" id="search" placeholder="Search filename..." style="flex:1; min-width:200px">
+    <select id="filter-type">
+        <option value="">All Types</option>
+        <option value="video">Video</option>
+        <option value="vr">VR</option>
+        <option value="audio">Audio</option>
+    </select>
+    <select id="filter-codec">
+        <option value="">All Codecs</option>
+        <option value="h264">H.264</option>
+        <option value="hevc">HEVC/H.265</option>
+        <option value="av1">AV1</option>
+        <option value="vp9">VP9</option>
+    </select>
+    <select id="filter-resolution">
+        <option value="">All Resolutions</option>
+        <option value="8K">8K</option>
+        <option value="5.7K">5.7K</option>
+        <option value="4K">4K</option>
+        <option value="1440p">1440p</option>
+        <option value="1080p">1080p</option>
+        <option value="720p">720p</option>
+        <option value="480p">480p</option>
+    </select>
+    <label style="display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap;">
+        <input type="checkbox" id="group-resolution"> Group by res
+    </label>
+    <div style="position:relative; display:inline-block;">
+        <button id="btn-scan" onclick="triggerScan()">Scan All</button>
+        <button id="btn-scan-menu" onclick="toggleScanMenu()" title="Scan a specific directory">&#9662;</button>
+        <div id="scan-menu" class="hidden" style="position:absolute; right:0; top:100%; background:#161b22; border:1px solid #30363d; border-radius:6px; min-width:250px; z-index:10; padding:4px 0; margin-top:4px;">
+            <div class="text-sm text-muted" style="padding:6px 12px;">Scan specific directory:</div>
+            <div id="scan-dir-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Files table -->
+<div class="card" style="padding:0;">
+    <table id="files-table">
+        <thead>
+            <tr>
+                <th data-sort="filename">Filename</th>
+                <th data-sort="media_type">Type</th>
+                <th data-sort="duration">Duration</th>
+                <th>Resolution</th>
+                <th>Codec</th>
+                <th data-sort="bitrate">Bitrate</th>
+                <th data-sort="file_size">Size</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody id="files-body"></tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="pagination" id="pagination"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const state = {
+    page: 1,
+    perPage: 50,
+    sort: 'filename',
+    order: 'asc',
+    search: '',
+    mediaType: '',
+    codec: '',
+    resolutionLabel: '',
+    groupByResolution: false,
+};
+
+let scanPollInterval = null;
+
+function esc(str) {
+    if (str == null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(str);
+    return d.textContent;
+}
+
+function formatDuration(sec) {
+    if (!sec) return '-';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    return m + ':' + String(s).padStart(2,'0');
+}
+
+function formatSize(bytes) {
+    if (!bytes) return '-';
+    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+    if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+    if (bytes >= 1e3) return (bytes / 1e3).toFixed(0) + ' KB';
+    return bytes + ' B';
+}
+
+function formatBitrate(bps) {
+    if (!bps) return '-';
+    if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mbps';
+    if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' kbps';
+    return bps + ' bps';
+}
+
+function createCell(text, title) {
+    const td = document.createElement('td');
+    td.textContent = text;
+    if (title) td.title = title;
+    return td;
+}
+
+function createBadge(type) {
+    const td = document.createElement('td');
+    const span = document.createElement('span');
+    span.className = 'badge badge-' + esc(type);
+    span.textContent = type;
+    td.appendChild(span);
+    return td;
+}
+
+async function fetchStats() {
+    try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        document.getElementById('stat-total').textContent = data.total_files;
+        document.getElementById('stat-video').textContent = data.by_type.video || 0;
+        document.getElementById('stat-vr').textContent = data.by_type.vr || 0;
+        document.getElementById('stat-audio').textContent = data.by_type.audio || 0;
+    } catch(e) { console.error('Failed to fetch stats', e); }
+}
+
+async function fetchFiles() {
+    const params = new URLSearchParams({
+        page: state.page,
+        per_page: state.perPage,
+        sort: state.sort,
+        order: state.order,
+    });
+    if (state.search) params.set('search', state.search);
+    if (state.mediaType) params.set('media_type', state.mediaType);
+    if (state.codec) params.set('codec', state.codec);
+    if (state.resolutionLabel) params.set('resolution_label', state.resolutionLabel);
+
+    try {
+        const res = await fetch('/api/files?' + params);
+        const data = await res.json();
+        renderFiles(data);
+    } catch(e) { console.error('Failed to fetch files', e); }
+}
+
+function buildFileRow(f) {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => toggleDetail(f.id, tr);
+
+    let resolution = '-';
+    if (f.width && f.height) {
+        resolution = f.width + 'x' + f.height;
+        if (f.resolution_label) resolution += ' (' + f.resolution_label + ')';
+    } else if (f.sample_rate) {
+        resolution = (f.sample_rate / 1000) + 'kHz';
+        if (f.channels) resolution += ' / ' + f.channels + 'ch';
+    }
+
+    let codec = f.video_codec || '';
+    if (f.media_type === 'audio') codec = f.is_lossless ? 'Lossless' : 'Lossy';
+
+    let detail = '';
+    if (f.is_vr && f.metadata_completeness != null) detail = f.metadata_completeness + '%';
+    else if (f.is_vr) detail = 'VR';
+
+    tr.appendChild(createCell(f.filename, f.file_path));
+    tr.appendChild(createBadge(f.media_type));
+    tr.appendChild(createCell(formatDuration(f.duration)));
+    tr.appendChild(createCell(resolution));
+    tr.appendChild(createCell(codec));
+    tr.appendChild(createCell(formatBitrate(f.bitrate)));
+    tr.appendChild(createCell(formatSize(f.file_size)));
+    tr.appendChild(createCell(detail));
+    return tr;
+}
+
+function renderFiles(data) {
+    const tbody = document.getElementById('files-body');
+    tbody.replaceChildren();
+
+    let files = data.files;
+    if (state.groupByResolution) {
+        const groups = {};
+        files.forEach(f => {
+            const key = f.resolution_label || (f.sample_rate ? 'Audio' : 'Unknown');
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(f);
+        });
+        const order = ['8K', '5.7K', '4K', '1440p', '1080p', '720p', '480p', 'Audio', 'Unknown'];
+        const sortedKeys = Object.keys(groups).sort((a, b) => {
+            const ai = order.indexOf(a), bi = order.indexOf(b);
+            return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+        });
+        sortedKeys.forEach(key => {
+            const headerTr = document.createElement('tr');
+            const headerTd = document.createElement('td');
+            headerTd.colSpan = 8;
+            headerTd.style.cssText = 'background:#21262d; font-weight:bold; padding:8px 12px;';
+            headerTd.textContent = key + ' (' + groups[key].length + ')';
+            headerTr.appendChild(headerTd);
+            tbody.appendChild(headerTr);
+            groups[key].forEach(f => tbody.appendChild(buildFileRow(f)));
+        });
+        renderPagination(data);
+        return;
+    }
+
+    data.files.forEach(f => tbody.appendChild(buildFileRow(f)));
+
+    renderPagination(data);
+}
+
+async function toggleDetail(fileId, tr) {
+    const nextRow = tr.nextElementSibling;
+    if (nextRow && nextRow.classList.contains('detail-row')) {
+        nextRow.classList.toggle('open');
+        return;
+    }
+    try {
+        const res = await fetch('/api/files/' + fileId);
+        const f = await res.json();
+        const detailTr = document.createElement('tr');
+        detailTr.className = 'detail-row open';
+        const td = document.createElement('td');
+        td.colSpan = 8;
+        const content = document.createElement('div');
+        content.className = 'detail-content';
+        const dl = document.createElement('dl');
+        dl.className = 'detail-grid';
+        Object.entries(f).forEach(([k, v]) => {
+            if (v == null || k === 'id' || k === 'file_id') return;
+            const dt = document.createElement('dt');
+            dt.textContent = k;
+            const dd = document.createElement('dd');
+            dd.textContent = String(v);
+            dl.appendChild(dt);
+            dl.appendChild(dd);
+        });
+        content.appendChild(dl);
+        td.appendChild(content);
+        detailTr.appendChild(td);
+        tr.after(detailTr);
+    } catch(e) { console.error('Detail fetch failed', e); }
+}
+
+function renderPagination(data) {
+    const div = document.getElementById('pagination');
+    div.replaceChildren();
+    if (data.pages <= 1) return;
+
+    for (let i = 1; i <= data.pages; i++) {
+        if (data.pages > 10 && Math.abs(i - data.page) > 3 && i !== 1 && i !== data.pages) {
+            if (Math.abs(i - data.page) === 4) {
+                const span = document.createElement('span');
+                span.textContent = '...';
+                span.style.padding = '8px';
+                div.appendChild(span);
+            }
+            continue;
+        }
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        if (i === data.page) btn.classList.add('active');
+        btn.onclick = () => { state.page = i; fetchFiles(); };
+        div.appendChild(btn);
+    }
+}
+
+async function triggerScan(scanDirs) {
+    const btn = document.getElementById('btn-scan');
+    btn.disabled = true;
+    document.getElementById('scan-menu').classList.add('hidden');
+    const opts = { method: 'POST' };
+    if (scanDirs) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify({ scan_dirs: scanDirs });
+    }
+    try {
+        const res = await fetch('/api/scan', opts);
+        if (res.ok) {
+            startScanPoll();
+        } else {
+            const data = await res.json();
+            alert(data.error || 'Scan failed to start');
+            btn.disabled = false;
+        }
+    } catch(e) {
+        alert('Failed to start scan');
+        btn.disabled = false;
+    }
+}
+
+async function stopScan() {
+    const btn = document.getElementById('btn-stop-scan');
+    btn.disabled = true;
+    btn.textContent = 'Stopping...';
+    try {
+        await fetch('/api/scan/stop', { method: 'POST' });
+    } catch(e) {
+        console.error('Failed to stop scan', e);
+    }
+}
+
+function toggleScanMenu() {
+    const menu = document.getElementById('scan-menu');
+    menu.classList.toggle('hidden');
+}
+
+async function loadScanDirs() {
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        const list = document.getElementById('scan-dir-list');
+        list.replaceChildren();
+        (config.scan_dirs || []).forEach(d => {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding:4px 12px; cursor:pointer;';
+            item.textContent = d;
+            item.onmouseenter = () => item.style.background = '#21262d';
+            item.onmouseleave = () => item.style.background = '';
+            item.onclick = () => triggerScan([d]);
+            list.appendChild(item);
+        });
+    } catch(e) { console.error('Failed to load scan dirs', e); }
+}
+
+function startScanPoll() {
+    const prog = document.getElementById('scan-progress');
+    prog.classList.remove('hidden');
+    scanPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/scan/status');
+            const data = await res.json();
+            document.getElementById('scan-bar').style.width = data.percent + '%';
+            document.getElementById('scan-file').textContent = data.current_file;
+            document.getElementById('scan-detail').textContent = data.processed + ' / ' + data.total + ' files';
+            if (!data.running) {
+                clearInterval(scanPollInterval);
+                prog.classList.add('hidden');
+                document.getElementById('btn-scan').disabled = false;
+                const stopBtn = document.getElementById('btn-stop-scan');
+                stopBtn.disabled = false;
+                stopBtn.textContent = 'Stop Scan';
+                fetchStats();
+                fetchFiles();
+            }
+        } catch(e) { console.error('Poll failed', e); }
+    }, 1000);
+}
+
+// Sort headers
+document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.onclick = () => {
+        const col = th.dataset.sort;
+        if (state.sort === col) {
+            state.order = state.order === 'asc' ? 'desc' : 'asc';
+        } else {
+            state.sort = col;
+            state.order = 'asc';
+        }
+        document.querySelectorAll('th').forEach(h => h.classList.remove('sorted'));
+        th.classList.add('sorted');
+        state.page = 1;
+        fetchFiles();
+    };
+});
+
+// Filters
+let searchTimeout;
+document.getElementById('search').addEventListener('input', e => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        state.search = e.target.value;
+        state.page = 1;
+        fetchFiles();
+    }, 300);
+});
+document.getElementById('filter-type').addEventListener('change', e => {
+    state.mediaType = e.target.value;
+    state.page = 1;
+    fetchFiles();
+});
+document.getElementById('filter-codec').addEventListener('change', e => {
+    state.codec = e.target.value;
+    state.page = 1;
+    fetchFiles();
+});
+document.getElementById('filter-resolution').addEventListener('change', e => {
+    state.resolutionLabel = e.target.value;
+    state.page = 1;
+    fetchFiles();
+});
+document.getElementById('group-resolution').addEventListener('change', e => {
+    state.groupByResolution = e.target.checked;
+    fetchFiles();
+});
+
+// Active nav
+document.getElementById('nav-dashboard').classList.add('active');
+
+// Close scan menu on outside click
+document.addEventListener('click', e => {
+    const menu = document.getElementById('scan-menu');
+    const btn = document.getElementById('btn-scan-menu');
+    if (!menu.contains(e.target) && e.target !== btn) {
+        menu.classList.add('hidden');
+    }
+});
+
+// Initial load
+fetchStats();
+fetchFiles();
+loadScanDirs();
+
+// Check if scan is already running
+fetch('/api/scan/status').then(r => r.json()).then(d => {
+    if (d.running) startScanPoll();
+});
+</script>
+{% endblock %}
