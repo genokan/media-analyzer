@@ -3,8 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "LICENSE"
+      - "CLAUDE.md"
+      - "docs/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "LICENSE"
+      - "CLAUDE.md"
+      - "docs/**"
 
 jobs:
   lint:
@@ -43,6 +53,7 @@ jobs:
         run: pytest tests/ -v
 
   docker:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
