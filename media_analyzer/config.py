@@ -9,10 +9,10 @@ import yaml
 DEFAULT_CONFIG = {
     "scan_dirs": [],
     "server": {
-        "host": "127.0.0.1",
+        "host": "0.0.0.0",
         "port": 8080,
     },
-    "db_path": "media_analyzer.db",
+    "db_path": "data/media_analyzer.db",
     "secret_token": None,
     "file_extensions": {
         "video": [".mp4", ".mkv", ".avi", ".mov", ".m4v"],
@@ -51,10 +51,12 @@ def load_config(config_path: Path | None = None) -> dict:
             user_config = yaml.safe_load(f) or {}
         config = _deep_merge(DEFAULT_CONFIG, user_config)
 
-    # Resolve db_path relative to config file
+    # Resolve db_path relative to config file location
     db_path = Path(config["db_path"])
     if not db_path.is_absolute():
-        config["db_path"] = str(config_path.parent / db_path)
+        db_path = config_path.parent / db_path
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    config["db_path"] = str(db_path)
 
     # Normalize scan_dirs: null, missing, or bare string → list
     scan_dirs = config.get("scan_dirs")

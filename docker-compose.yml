@@ -8,7 +8,6 @@ services:
       - "8080:8080"
     volumes:
       - ./data:/app/data
-      - ./config.yaml:/app/config.yaml
       # Add your media directories as read-only mounts:
-      - /mnt/:/data:ro
+      # - /path/to/media:/data/media:ro
     restart: unless-stopped
