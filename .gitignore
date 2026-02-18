@@ -5,6 +5,7 @@ __pycache__/
 dist/
 build/
 *.egg
+media_analyzer/_version.py
 
 # Virtual environments
 .venv/

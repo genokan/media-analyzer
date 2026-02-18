@@ -81,5 +81,6 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ steps.meta.outputs.owner }}/media-analyzer:latest
+          build-args: SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0-dev
           cache-from: type=gha
           cache-to: type=gha,mode=max

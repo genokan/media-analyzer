@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "media-analyzer"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Web-based media file analyzer — scan, browse, and manage video, audio, and VR media metadata"
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,12 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
 ]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "media_analyzer/_version.py"
 
 [tool.ruff]
 line-length = 100

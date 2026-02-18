@@ -46,14 +46,14 @@ tests/
 - Repo: `genokan/media-analyzer`
 
 ## Releasing
-- **Tag-driven**: git tag is the single source of truth for versions
+- **Tag-driven**: git tag is the single source of truth for versions (`hatch-vcs`)
+- No `__version__` in source code — version derived from git tags at build time
 - Release process:
-  1. Bump `__version__` in `media_analyzer/__init__.py`
-  2. Merge to main
-  3. Tag: `git tag v0.x.x && git push origin v0.x.x`
-  4. CI validates tag matches `__version__`, runs lint/tests, builds Docker image, creates GitHub Release
+  1. `git tag v0.x.x && git push origin v0.x.x`
+  2. CI runs lint/tests, builds Docker image, creates GitHub Release
+- Pre-release tags (e.g., `v0.2.0-dev.1`, `v0.2.0-rc.1`) create pre-release artifacts without updating `:latest`
 - CI on main pushes `:latest` Docker image only
-- Release workflow pushes `:v0.x.x` + `:latest` Docker image
+- Release workflow pushes `:v0.x.x` + `:latest` (stable) or `:v0.x.x-pre` only (pre-release)
 
 ## Development Commands
 ```bash
