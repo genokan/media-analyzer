@@ -98,7 +98,9 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        tr:hover td { background: #1c2128; }
+        tr[style*="cursor"] { transition: background 0.15s; }
+        tr[style*="cursor"]:hover td { background: #1c2128; }
+        tr[style*="cursor"]:hover td:first-child { box-shadow: inset 3px 0 0 #58a6ff; }
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -203,6 +205,28 @@
         .pagination button.active {
             background: #58a6ff;
             border-color: #58a6ff;
+            font-weight: 700;
+        }
+        .pagination .page-info {
+            color: #8b949e;
+            font-size: 13px;
+            padding: 8px;
+            white-space: nowrap;
+        }
+        .scan-split {
+            display: inline-flex;
+            position: relative;
+        }
+        .scan-split button:first-child {
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+            border-right: none;
+        }
+        .scan-split button:last-of-type {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            padding: 8px 8px;
+            min-width: auto;
         }
         .col-toggle {
             position: relative;

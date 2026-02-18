@@ -45,18 +45,18 @@ tests/
 
 ## Development Commands
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (uses uv — pyproject.toml is the single source of truth)
+uv sync --dev
 
-# Run the app locally
-python -m media_analyzer serve
+# Run the app locally (config.yaml is auto-generated on first run)
+uv run python -m media_analyzer serve
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Lint and format
-ruff check .
-ruff format .
+uv run ruff check .
+uv run ruff format .
 
 # Build Docker image locally
 docker build -t media-analyzer .

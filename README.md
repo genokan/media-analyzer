@@ -37,16 +37,18 @@ docker compose up -d
 ### Running Locally
 
 ```bash
+# Install uv (if not already installed)
+# macOS: brew install uv
+# Other: curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Install dependencies
-pip install -r requirements.txt
+uv sync
 
-# Create a config file
-cp config.yaml.example config.yaml
-# Edit config.yaml with your media directories
-
-# Start the server
-python -m media_analyzer serve
+# Start the server (config.yaml is auto-generated on first run)
+uv run python -m media_analyzer serve
 ```
+
+Edit the generated `config.yaml` to add your media directories, then restart.
 
 ## Pages
 
@@ -107,17 +109,17 @@ All data is served via a JSON API:
 ## Development
 
 ```bash
-# Install dev dependencies
-pip install -r requirements.txt pytest ruff
+# Install all dependencies (including dev tools)
+uv sync --dev
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Lint
-ruff check .
+uv run ruff check .
 
 # Format
-ruff format .
+uv run ruff format .
 ```
 
 ## Tech Stack
