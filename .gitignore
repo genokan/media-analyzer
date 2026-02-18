@@ -29,3 +29,6 @@ Thumbs.db
 
 # Worktrees
 .worktrees/
+
+#playwright 
+.playwright-mcp/

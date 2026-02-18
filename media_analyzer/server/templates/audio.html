@@ -237,6 +237,11 @@ function renderPagination(data) {
         btn.onclick = () => { state.page = i; fetchFiles(); };
         div.appendChild(btn);
     }
+
+    const info = document.createElement('span');
+    info.className = 'page-info';
+    info.textContent = 'Page ' + data.page + ' of ' + data.pages;
+    div.appendChild(info);
 }
 
 // Filters
