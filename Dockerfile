@@ -9,4 +9,4 @@ RUN uv sync --frozen --no-dev --no-editable
 RUN useradd -m appuser
 USER appuser
 EXPOSE 8080
-CMD ["uv", "run", "python", "-m", "media_analyzer", "serve"]
+CMD ["uv", "run", "--no-sync", "python", "-m", "media_analyzer", "serve"]
