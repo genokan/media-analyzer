@@ -32,7 +32,7 @@ media_analyzer/           # Main Python package
 pyproject.toml            # Build config, ruff settings, pytest config
 docker-compose.yml        # Development/example compose
 Dockerfile
-requirements.txt
+uv.lock                  # Lockfile (committed, reproducible builds)
 tests/
 ```
 
@@ -41,7 +41,19 @@ tests/
 - **All work goes through pull requests** to main
 - Branch naming: `feature/`, `bug/`, `chore/` prefixes
 - Squash merge PRs to keep main history clean
+- Merged branches are automatically deleted
+- CODEOWNERS: `@BrandonCantrell` reviews all PRs
 - Repo: `genokan/media-analyzer`
+
+## Releasing
+- **Tag-driven**: git tag is the single source of truth for versions (`hatch-vcs`)
+- No `__version__` in source code — version derived from git tags at build time
+- Release process:
+  1. `git tag v0.x.x && git push origin v0.x.x`
+  2. CI runs lint/tests, builds Docker image, creates GitHub Release
+- Pre-release tags (e.g., `v0.2.0-dev.1`, `v0.2.0-rc.1`) create pre-release artifacts without updating `:latest`
+- CI on main pushes `:latest` Docker image only
+- Release workflow pushes `:v0.x.x` + `:latest` (stable) or `:v0.x.x-pre` only (pre-release)
 
 ## Development Commands
 ```bash
@@ -80,7 +92,7 @@ docker build -t media-analyzer .
 
 ## Docker / Deployment
 - Image: `ghcr.io/genokan/media-analyzer`
-- CI pushes `:latest` + version tag on merge to main
+- CI pushes `:latest` on merge to main; versioned tags via release workflow
 - Config: optional `config.yaml` mounted at `/config/config.yaml`
 - DB stored in `data/` subdirectory (auto-created)
 - Media directories mounted read-only
