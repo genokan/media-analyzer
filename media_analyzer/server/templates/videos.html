@@ -28,6 +28,9 @@
         <button class="btn-secondary" id="btn-columns" type="button">Columns</button>
         <div class="col-toggle-menu" id="col-menu"></div>
     </div>
+    <div id="hash-toolbar" style="display:none;">
+        <button type="button" id="btn-hash" class="btn-secondary">Compute Hashes</button>
+    </div>
 </div>
 
 <!-- Files table -->
@@ -41,20 +44,44 @@
 </div>
 
 <div class="pagination" id="pagination"></div>
+
+<!-- Perceptual hash modal -->
+<div id="hash-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center;">
+    <div class="card" style="min-width:360px; max-width:480px; margin:0;">
+        <h3 style="margin-bottom:16px;">Compute Perceptual Hashes</h3>
+        <label style="display:block; margin-bottom:8px; color:#8b949e; font-size:13px;">Scope</label>
+        <select id="hash-dir-select" style="width:100%; margin-bottom:16px;">
+            <option value="">All configured directories</option>
+        </select>
+        <div id="hash-progress-area" style="display:none; margin-bottom:16px;">
+            <div style="font-size:13px; color:#8b949e; margin-bottom:4px;">
+                <span id="hash-progress-label">Starting…</span>
+            </div>
+            <div class="progress-bar"><div class="fill" id="hash-progress-fill" style="width:0%"></div></div>
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button type="button" id="btn-hash-cancel" class="btn-secondary">Cancel</button>
+            <button type="button" id="btn-hash-stop" class="btn-danger" style="display:none;">Stop</button>
+            <button type="button" id="btn-hash-start">Start</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const COLUMNS = [
-    { key: 'filename',    label: 'Filename',    sort: 'filename',  default: true },
-    { key: 'resolution',  label: 'Resolution',  sort: null,        default: true },
-    { key: 'codec',       label: 'Codec',       sort: null,        default: true },
-    { key: 'frame_rate',  label: 'Frame Rate',  sort: null,        default: true },
-    { key: 'bitrate',     label: 'Bitrate',     sort: 'bitrate',   default: true },
-    { key: 'bpp',         label: 'Bitrate/px',  sort: null,        default: false },
-    { key: 'audio_codec', label: 'Audio Codec', sort: null,        default: false },
-    { key: 'duration',    label: 'Duration',    sort: 'duration',  default: true },
-    { key: 'file_size',   label: 'Size',        sort: 'file_size', default: true },
+    { key: 'filename',    label: 'Filename',         sort: 'filename',  default: true },
+    { key: 'resolution',  label: 'Resolution',       sort: null,        default: true },
+    { key: 'codec',       label: 'Codec',            sort: null,        default: true },
+    { key: 'frame_rate',  label: 'Frame Rate',       sort: null,        default: true },
+    { key: 'bitrate',     label: 'Bitrate',          sort: 'bitrate',   default: true },
+    { key: 'bpp',         label: 'Bitrate/px',       sort: null,        default: false },
+    { key: 'audio_codec', label: 'Audio Codec',      sort: null,        default: false },
+    { key: 'duration',    label: 'Duration',         sort: 'duration',  default: true },
+    { key: 'file_size',   label: 'Size',             sort: 'file_size', default: true },
+    { key: 'quick_hash',  label: 'Quick Hash',       sort: null,        default: false },
+    { key: 'video_phash', label: 'Perceptual Hash',  sort: null,        default: false },
 ];
 
 const STORAGE_KEY = 'media-analyzer-video-cols';
@@ -146,6 +173,16 @@ function cellValue(f, key) {
         case 'audio_codec': return { text: f.audio_codec || '-' };
         case 'duration':    return { text: formatDuration(f.duration) };
         case 'file_size':   return { text: formatSize(f.file_size) };
+        case 'quick_hash': {
+            if (!f.quick_hash) return { text: '—' };
+            const short = f.quick_hash.substring(0, 12) + '…';
+            return { text: short, title: f.quick_hash };
+        }
+        case 'video_phash': {
+            if (!f.video_phash) return { text: '—' };
+            const short = f.video_phash.substring(0, 16) + '…';
+            return { text: short, title: f.video_phash };
+        }
         default:            return { text: '-' };
     }
 }
@@ -279,9 +316,84 @@ document.addEventListener('click', e => {
     if (!toggle.contains(e.target)) document.getElementById('col-menu').classList.remove('open');
 });
 
+// --- Perceptual hash UI ---
+let hashPollInterval = null;
+
+async function loadHashConfig() {
+    try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        if (cfg.hashing && cfg.hashing.phash) {
+            document.getElementById('hash-toolbar').style.display = '';
+            const sel = document.getElementById('hash-dir-select');
+            (cfg.scan_dirs || []).forEach(dir => {
+                const opt = document.createElement('option');
+                opt.value = dir; opt.textContent = dir;
+                sel.appendChild(opt);
+            });
+        }
+    } catch(e) {}
+}
+
+document.getElementById('btn-hash').onclick = () => {
+    document.getElementById('hash-modal').style.display = 'flex';
+    document.getElementById('hash-progress-area').style.display = 'none';
+    document.getElementById('btn-hash-start').style.display = '';
+    document.getElementById('btn-hash-stop').style.display = 'none';
+};
+
+document.getElementById('btn-hash-cancel').onclick = () => {
+    clearInterval(hashPollInterval);
+    document.getElementById('hash-modal').style.display = 'none';
+};
+
+document.getElementById('btn-hash-start').onclick = async () => {
+    const dir = document.getElementById('hash-dir-select').value;
+    const body = dir ? { scan_dirs: [dir] } : {};
+    try {
+        const res = await fetch('/api/hash', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.error || 'Failed to start');
+            return;
+        }
+        document.getElementById('btn-hash-start').style.display = 'none';
+        document.getElementById('btn-hash-stop').style.display = '';
+        document.getElementById('hash-progress-area').style.display = '';
+        hashPollInterval = setInterval(pollHashProgress, 1500);
+    } catch(e) { alert('Request failed'); }
+};
+
+document.getElementById('btn-hash-stop').onclick = async () => {
+    await fetch('/api/hash/stop', { method: 'POST' });
+};
+
+async function pollHashProgress() {
+    try {
+        const res = await fetch('/api/hash/status');
+        const d = await res.json();
+        document.getElementById('hash-progress-fill').style.width = d.percent + '%';
+        document.getElementById('hash-progress-label').textContent =
+            d.running
+                ? `${d.processed} / ${d.total} hashed (${d.percent}%)`
+                : `Done — ${d.processed} files hashed`;
+        if (!d.running) {
+            clearInterval(hashPollInterval);
+            document.getElementById('btn-hash-stop').style.display = 'none';
+            document.getElementById('btn-hash-start').style.display = '';
+            fetchFiles();
+        }
+    } catch(e) {}
+}
+
 document.getElementById('nav-videos').classList.add('active');
 buildColumnMenu();
 renderHeader();
+loadHashConfig();
 fetchFiles();
 </script>
 {% endblock %}

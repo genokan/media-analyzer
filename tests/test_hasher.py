@@ -3,8 +3,6 @@
 import io
 from unittest.mock import patch
 
-import pytest
-
 from media_analyzer.jobs.hasher import quick_hash, video_phash
 
 

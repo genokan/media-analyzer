@@ -3,8 +3,6 @@
 import threading
 import time
 
-import pytest
-
 from media_analyzer.jobs.runner import JobProgress, JobRunner
 
 
