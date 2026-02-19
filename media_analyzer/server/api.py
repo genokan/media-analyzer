@@ -6,6 +6,7 @@ import threading
 from flask import Blueprint, current_app, jsonify, request
 
 from media_analyzer import __version__
+from media_analyzer.jobs.phash_job import phash_progress, run_phash_job
 from media_analyzer.scanner import run_scan, scan_progress
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -121,6 +122,7 @@ def get_config():
         "server": config.get("server", {}),
         "file_extensions": config.get("file_extensions", {}),
         "has_secret_token": bool(config.get("secret_token")),
+        "hashing": config.get("hashing", {}),
     }
     return jsonify(safe_config)
 
@@ -154,6 +156,49 @@ def update_config():
     current_app.config["MEDIA_ANALYZER"] = config
 
     return jsonify({"status": "updated", "warnings": warnings})
+
+
+@api_bp.route("/hash", methods=["POST"])
+def trigger_hash():
+    if phash_progress.running:
+        return jsonify(
+            {
+                "error": "Phash job already in progress",
+                "progress": phash_progress.to_dict(),
+            }
+        ), 409
+
+    db = _get_db()
+    config = _get_config()
+
+    override_dirs = None
+    body = request.get_json(silent=True)
+    if body and "scan_dirs" in body:
+        requested = body["scan_dirs"]
+        configured = set(config.get("scan_dirs", []))
+        invalid = [d for d in requested if d not in configured]
+        if invalid:
+            return jsonify({"error": "Directories not in config", "invalid": invalid}), 400
+        override_dirs = requested
+
+    thread = threading.Thread(
+        target=run_phash_job, args=(db, config, override_dirs), daemon=True
+    )
+    thread.start()
+    return jsonify({"status": "started", "message": "Phash job started in background"})
+
+
+@api_bp.route("/hash/status")
+def hash_status():
+    return jsonify(phash_progress.to_dict())
+
+
+@api_bp.route("/hash/stop", methods=["POST"])
+def stop_hash():
+    if not phash_progress.running:
+        return jsonify({"error": "No phash job is running"}), 409
+    phash_progress.cancel_requested = True
+    return jsonify({"status": "stopping", "message": "Phash stop requested"})
 
 
 @api_bp.route("/version")
