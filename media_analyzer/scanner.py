@@ -1,4 +1,4 @@
-"""Directory scanner - walks configured dirs, probes files, stores results."""
+"""Directory scanner — walks configured dirs, probes files, stores results."""
 
 import logging
 import os
@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from media_analyzer.db import Database
+from media_analyzer.jobs.hasher import quick_hash
+from media_analyzer.jobs.runner import JobRunner
 from media_analyzer.probers.audio import AudioProber
 from media_analyzer.probers.vr import VRProber
 
@@ -42,7 +44,7 @@ class ScanProgress:
             self.current_file = current_file
 
 
-# Global progress instance
+# Global progress instance shared with the API layer.
 scan_progress = ScanProgress()
 
 
@@ -66,7 +68,6 @@ def _collect_files(scan_dirs: list[str], extensions: dict) -> list[tuple[str, st
                 ext = os.path.splitext(fname)[1].lower()
                 if ext in all_exts:
                     full_path = os.path.join(root, fname)
-                    # Validate path stays within configured directory
                     try:
                         real = os.path.realpath(full_path)
                         if not real.startswith(os.path.realpath(scan_dir)):
@@ -80,7 +81,13 @@ def _collect_files(scan_dirs: list[str], extensions: dict) -> list[tuple[str, st
 
 
 def run_scan(db: Database, config: dict, override_scan_dirs: list[str] | None = None) -> int:
-    """Execute a full scan. Returns the scan_id."""
+    """Execute a full library scan. Returns the scan_id.
+
+    Uses JobRunner for parallel probing (expensive) with serialized DB writes
+    (cheap). Quick hash is computed for every new or modified file. Files that
+    are unchanged and already hashed are skipped entirely; unchanged files
+    missing a hash receive only a quick_hash update without re-probing.
+    """
     global scan_progress
 
     if override_scan_dirs is not None:
@@ -89,85 +96,104 @@ def run_scan(db: Database, config: dict, override_scan_dirs: list[str] | None = 
         scan_dirs = config.get("scan_dirs") or []
     if isinstance(scan_dirs, str):
         scan_dirs = [scan_dirs]
+
     extensions = config.get("file_extensions", {})
+    max_workers = config.get("hashing", {}).get("workers", 4)
 
     vr_prober = VRProber()
     audio_prober = AudioProber()
 
-    # Collect files
     files = _collect_files(scan_dirs, extensions)
+    logger.info("Scan starting: %d files found, %d workers", len(files), max_workers)
 
     scan_id = db.start_scan()
     scan_progress.running = True
     scan_progress.total = len(files)
     scan_progress.processed = 0
     scan_progress.scan_id = scan_id
+    scan_progress.cancel_requested = False
 
-    files_new = 0
-    files_updated = 0
-    processed = 0
+    files_written = 0
 
-    try:
-        for file_path, category in files:
-            if scan_progress.cancel_requested:
-                break
+    def worker(item: tuple[str, str]) -> dict | None:
+        file_path, category = item
+        try:
+            stat = os.stat(file_path)
+            file_size = stat.st_size
+            modified_date = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
 
-            processed += 1
-            scan_progress.update(processed, os.path.basename(file_path))
+            if db.file_unchanged(file_path, file_size, modified_date):
+                return None  # fully up-to-date, skip
 
-            try:
-                stat = os.stat(file_path)
-                file_size = stat.st_size
-                modified_date = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
-
-                # Incremental: skip unchanged files
-                if db.file_unchanged(file_path, file_size, modified_date):
-                    continue
-
-                # Probe the file
-                if category == "audio":
-                    result = audio_prober.probe(file_path)
-                else:
-                    # Try VR prober first (extends video prober)
-                    result = vr_prober.probe(file_path)
-
-                if result is None:
-                    logger.warning("Could not probe: %s", file_path)
-                    continue
-
-                # Store in database
-                media_data = {
-                    "file_path": file_path,
-                    "filename": os.path.basename(file_path),
-                    "file_size": file_size,
-                    "modified_date": modified_date,
-                    "media_type": result["media_type"],
-                    "container_format": result.get("container_format"),
-                    "duration": result.get("duration"),
-                    "bitrate": result.get("bitrate"),
+            if db.file_needs_hash_only(file_path, file_size, modified_date):
+                logger.debug("Hash-only update for: %s", file_path)
+                return {
+                    "_hash_only": True,
+                    "_file_path": file_path,
+                    "_quick_hash": quick_hash(file_path),
                 }
 
-                file_id = db.upsert_media_file(media_data)
+            if category == "audio":
+                result = audio_prober.probe(file_path)
+            else:
+                result = vr_prober.probe(file_path)
 
-                if category == "audio":
-                    db.upsert_audio_metadata(file_id, result.get("audio", {}))
-                else:
-                    # Video metadata
-                    db.upsert_video_metadata(file_id, result)
-                    # VR metadata if present
-                    if "vr" in result:
-                        db.upsert_vr_metadata(file_id, result["vr"])
+            if result is None:
+                logger.warning("Could not probe: %s", file_path)
+                return None
 
-                files_new += 1  # Simplified: count all processed as new/updated
+            result["_file_path"] = file_path
+            result["_filename"] = os.path.basename(file_path)
+            result["_file_size"] = file_size
+            result["_modified_date"] = modified_date
+            result["_category"] = category
+            result["_quick_hash"] = quick_hash(file_path)
+            return result
 
-            except Exception:
-                logger.exception("Error processing %s", file_path)
-                continue
+        except Exception:
+            logger.exception("Error processing: %s", file_path)
+            return None
 
-        db.finish_scan(scan_id, processed, files_new, files_updated)
+    def writer(item: tuple[str, str], result: dict):
+        nonlocal files_written
+
+        if result.get("_hash_only"):
+            db.upsert_quick_hash_by_path(result["_file_path"], result["_quick_hash"])
+            files_written += 1
+            return
+
+        media_data = {
+            "file_path": result["_file_path"],
+            "filename": result["_filename"],
+            "file_size": result["_file_size"],
+            "modified_date": result["_modified_date"],
+            "media_type": result["media_type"],
+            "container_format": result.get("container_format"),
+            "duration": result.get("duration"),
+            "bitrate": result.get("bitrate"),
+        }
+
+        file_id = db.upsert_media_file(media_data)
+        db.upsert_quick_hash(file_id, result["_quick_hash"])
+
+        category = result["_category"]
+        if category == "audio":
+            db.upsert_audio_metadata(file_id, result.get("audio", {}))
+        else:
+            db.upsert_video_metadata(file_id, result)
+            if "vr" in result:
+                db.upsert_vr_metadata(file_id, result["vr"])
+
+        files_written += 1
+
+    runner = JobRunner(max_workers=max_workers)
+    try:
+        runner.run(files, worker, writer, scan_progress)
+        db.finish_scan(scan_id, len(files), files_written, 0)
+        logger.info("Scan complete: %d/%d files written", files_written, len(files))
     except Exception:
         logger.exception("Scan failed")
-        db.fail_scan(scan_id, processed)
+        db.fail_scan(scan_id, files_written)
     finally:
         scan_progress.running = False
         scan_progress.cancel_requested = False
