@@ -6,6 +6,8 @@ dist/
 build/
 *.egg
 media_analyzer/_version.py
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
