@@ -51,9 +51,11 @@ tests/
 - Release process:
   1. `git tag v0.x.x && git push origin v0.x.x`
   2. CI runs lint/tests, builds Docker image, creates GitHub Release
-- Pre-release tags (e.g., `v0.2.0-dev.1`, `v0.2.0-rc.1`) create pre-release artifacts without updating `:latest`
+- Pre-release tags use **PEP 440 format** — `v0.2.0a1` (alpha), `v0.2.0b1` (beta), `v0.2.0rc1` (RC)
+- Pre-release tags create pre-release artifacts without updating `:latest`
+- **Do not use hyphen formats** like `v0.2.0-dev.1` — hatch-vcs cannot bump `.devN` where N > 0
 - CI on main pushes `:latest` Docker image only
-- Release workflow pushes `:v0.x.x` + `:latest` (stable) or `:v0.x.x-pre` only (pre-release)
+- Release workflow pushes `:v0.x.x` + `:latest` (stable) or `:v0.x.x` only (pre-release)
 
 ## Development Commands
 ```bash
