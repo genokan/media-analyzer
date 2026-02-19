@@ -181,9 +181,7 @@ def trigger_hash():
             return jsonify({"error": "Directories not in config", "invalid": invalid}), 400
         override_dirs = requested
 
-    thread = threading.Thread(
-        target=run_phash_job, args=(db, config, override_dirs), daemon=True
-    )
+    thread = threading.Thread(target=run_phash_job, args=(db, config, override_dirs), daemon=True)
     thread.start()
     return jsonify({"status": "started", "message": "Phash job started in background"})
 

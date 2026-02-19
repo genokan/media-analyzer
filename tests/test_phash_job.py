@@ -15,14 +15,16 @@ def db(tmp_path):
 
 @pytest.fixture
 def video_file_id(db):
-    return db.upsert_media_file({
-        "file_path": "/movies/film.mp4",
-        "filename": "film.mp4",
-        "file_size": 5_000_000,
-        "modified_date": "2024-01-01T00:00:00",
-        "media_type": "video",
-        "duration": 7200.0,
-    })
+    return db.upsert_media_file(
+        {
+            "file_path": "/movies/film.mp4",
+            "filename": "film.mp4",
+            "file_size": 5_000_000,
+            "modified_date": "2024-01-01T00:00:00",
+            "media_type": "video",
+            "duration": 7200.0,
+        }
+    )
 
 
 class TestRunPhashJob:
@@ -34,13 +36,15 @@ class TestRunPhashJob:
         assert detail["video_phash"] == "hash1|hash2"
 
     def test_skips_audio_files(self, db):
-        db.upsert_media_file({
-            "file_path": "/music/song.mp3",
-            "filename": "song.mp3",
-            "file_size": 5_000_000,
-            "modified_date": "2024-01-01",
-            "media_type": "audio",
-        })
+        db.upsert_media_file(
+            {
+                "file_path": "/music/song.mp3",
+                "filename": "song.mp3",
+                "file_size": 5_000_000,
+                "modified_date": "2024-01-01",
+                "media_type": "audio",
+            }
+        )
         config = {"hashing": {"workers": 1}}
         with patch("media_analyzer.jobs.phash_job.video_phash", return_value="h") as mock_phash:
             run_phash_job(db, config)
@@ -54,14 +58,16 @@ class TestRunPhashJob:
         mock_phash.assert_not_called()
 
     def test_scoped_to_scan_dirs(self, db, video_file_id):
-        db.upsert_media_file({
-            "file_path": "/tv/show.mp4",
-            "filename": "show.mp4",
-            "file_size": 1_000,
-            "modified_date": "2024-01-01",
-            "media_type": "video",
-            "duration": 3600.0,
-        })
+        db.upsert_media_file(
+            {
+                "file_path": "/tv/show.mp4",
+                "filename": "show.mp4",
+                "file_size": 1_000,
+                "modified_date": "2024-01-01",
+                "media_type": "video",
+                "duration": 3600.0,
+            }
+        )
         config = {"hashing": {"workers": 1}}
         hashed = []
 
@@ -83,14 +89,16 @@ class TestRunPhashJob:
         import time
 
         for i in range(20):
-            db.upsert_media_file({
-                "file_path": f"/movies/film{i}.mp4",
-                "filename": f"film{i}.mp4",
-                "file_size": 1_000,
-                "modified_date": "2024-01-01",
-                "media_type": "video",
-                "duration": 100.0,
-            })
+            db.upsert_media_file(
+                {
+                    "file_path": f"/movies/film{i}.mp4",
+                    "filename": f"film{i}.mp4",
+                    "file_size": 1_000,
+                    "modified_date": "2024-01-01",
+                    "media_type": "video",
+                    "duration": 100.0,
+                }
+            )
 
         phash_progress.cancel_requested = False
         written = []

@@ -30,9 +30,7 @@ def run_phash_job(
     """
     max_workers = config.get("hashing", {}).get("workers", 4)
     files = db.get_unhashed_videos(scan_dirs=scan_dirs)
-    logger.info(
-        "Phash job starting: %d files to hash, %d workers", len(files), max_workers
-    )
+    logger.info("Phash job starting: %d files to hash, %d workers", len(files), max_workers)
 
     phash_progress.running = True
     phash_progress.total = len(files)

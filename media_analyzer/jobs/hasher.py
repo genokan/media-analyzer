@@ -75,12 +75,18 @@ def _extract_frame(file_path: str, timestamp: float) -> bytes | None:
     """
     cmd = [
         "ffmpeg",
-        "-ss", str(timestamp),
-        "-i", file_path,
-        "-frames:v", "1",
-        "-f", "image2",
-        "-vcodec", "mjpeg",
-        "-q:v", "5",
+        "-ss",
+        str(timestamp),
+        "-i",
+        file_path,
+        "-frames:v",
+        "1",
+        "-f",
+        "image2",
+        "-vcodec",
+        "mjpeg",
+        "-q:v",
+        "5",
         "pipe:1",
     ]
     try:

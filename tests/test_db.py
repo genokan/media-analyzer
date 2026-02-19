@@ -14,13 +14,15 @@ def db(tmp_path):
 
 @pytest.fixture
 def sample_file_id(db):
-    return db.upsert_media_file({
-        "file_path": "/test/video.mp4",
-        "filename": "video.mp4",
-        "file_size": 1000000,
-        "modified_date": "2024-01-01T00:00:00",
-        "media_type": "video",
-    })
+    return db.upsert_media_file(
+        {
+            "file_path": "/test/video.mp4",
+            "filename": "video.mp4",
+            "file_size": 1000000,
+            "modified_date": "2024-01-01T00:00:00",
+            "media_type": "video",
+        }
+    )
 
 
 class TestSchema:
@@ -109,52 +111,62 @@ class TestUpsertVideoPhash:
 
 class TestGetUnhashedVideos:
     def test_returns_videos_without_phash(self, db):
-        db.upsert_media_file({
-            "file_path": "/movies/film.mp4",
-            "filename": "film.mp4",
-            "file_size": 5000000,
-            "modified_date": "2024-01-01",
-            "media_type": "video",
-            "duration": 7200.0,
-        })
-        db.upsert_media_file({
-            "file_path": "/music/song.mp3",
-            "filename": "song.mp3",
-            "file_size": 5000000,
-            "modified_date": "2024-01-01",
-            "media_type": "audio",
-        })
+        db.upsert_media_file(
+            {
+                "file_path": "/movies/film.mp4",
+                "filename": "film.mp4",
+                "file_size": 5000000,
+                "modified_date": "2024-01-01",
+                "media_type": "video",
+                "duration": 7200.0,
+            }
+        )
+        db.upsert_media_file(
+            {
+                "file_path": "/music/song.mp3",
+                "filename": "song.mp3",
+                "file_size": 5000000,
+                "modified_date": "2024-01-01",
+                "media_type": "audio",
+            }
+        )
         rows = db.get_unhashed_videos()
         assert len(rows) == 1
         assert rows[0]["file_path"] == "/movies/film.mp4"
 
     def test_excludes_already_hashed(self, db):
-        fid = db.upsert_media_file({
-            "file_path": "/movies/film.mp4",
-            "filename": "film.mp4",
-            "file_size": 5000000,
-            "modified_date": "2024-01-01",
-            "media_type": "video",
-        })
+        fid = db.upsert_media_file(
+            {
+                "file_path": "/movies/film.mp4",
+                "filename": "film.mp4",
+                "file_size": 5000000,
+                "modified_date": "2024-01-01",
+                "media_type": "video",
+            }
+        )
         db.upsert_video_phash(fid, "somehash")
         rows = db.get_unhashed_videos()
         assert len(rows) == 0
 
     def test_filter_by_scan_dirs(self, db):
-        db.upsert_media_file({
-            "file_path": "/movies/film.mp4",
-            "filename": "film.mp4",
-            "file_size": 1000,
-            "modified_date": "2024-01-01",
-            "media_type": "video",
-        })
-        db.upsert_media_file({
-            "file_path": "/tv/show.mp4",
-            "filename": "show.mp4",
-            "file_size": 1000,
-            "modified_date": "2024-01-01",
-            "media_type": "video",
-        })
+        db.upsert_media_file(
+            {
+                "file_path": "/movies/film.mp4",
+                "filename": "film.mp4",
+                "file_size": 1000,
+                "modified_date": "2024-01-01",
+                "media_type": "video",
+            }
+        )
+        db.upsert_media_file(
+            {
+                "file_path": "/tv/show.mp4",
+                "filename": "show.mp4",
+                "file_size": 1000,
+                "modified_date": "2024-01-01",
+                "media_type": "video",
+            }
+        )
         rows = db.get_unhashed_videos(scan_dirs=["/movies"])
         assert len(rows) == 1
         assert rows[0]["file_path"] == "/movies/film.mp4"
