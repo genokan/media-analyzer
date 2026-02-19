@@ -20,6 +20,7 @@ def app(tmp_path):
             "video": [".mp4", ".mkv"],
             "audio": [".mp3", ".flac"],
         },
+        "hashing": {"workers": 1, "phash": False},
     }
     app = create_app(config)
     app.config["TESTING"] = True
@@ -225,6 +226,7 @@ class TestAuth:
             "secret_token": "test-secret-123",
             "_flask_secret": "flask-secret",
             "file_extensions": {"video": [], "audio": []},
+            "hashing": {"workers": 1, "phash": False},
         }
         app = create_app(config)
         app.config["TESTING"] = True
@@ -246,6 +248,7 @@ class TestAuth:
             "secret_token": "test-secret-123",
             "_flask_secret": "flask-secret",
             "file_extensions": {"video": [], "audio": []},
+            "hashing": {"workers": 1, "phash": False},
         }
         app = create_app(config)
         app.config["TESTING"] = True
@@ -262,6 +265,7 @@ class TestAuth:
             "secret_token": "correct-token",
             "_flask_secret": "flask-secret",
             "file_extensions": {"video": [], "audio": []},
+            "hashing": {"workers": 1, "phash": False},
         }
         app = create_app(config)
         app.config["TESTING"] = True
