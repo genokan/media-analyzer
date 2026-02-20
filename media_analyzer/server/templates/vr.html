@@ -29,9 +29,27 @@
         <button class="btn-secondary" id="btn-columns" type="button">Columns</button>
         <div class="col-toggle-menu" id="col-menu"></div>
     </div>
-    <div id="hash-toolbar" style="display:none;">
-        <button type="button" id="btn-hash" class="btn-secondary">Compute Hashes</button>
+    <div id="hash-toolbar" style="display:none;" class="scan-split">
+        <button type="button" id="btn-hash">Compute Hashes</button>
+        <button type="button" id="btn-hash-menu" title="Hash a specific directory">&#9662;</button>
+        <div id="hash-menu" class="hidden" style="position:absolute; right:0; top:100%; background:#161b22; border:1px solid #30363d; border-radius:6px; min-width:250px; z-index:10; padding:4px 0; margin-top:4px;">
+            <div class="text-sm text-muted" style="padding:6px 12px;">Hash specific directory:</div>
+            <div id="hash-dir-list"></div>
+        </div>
     </div>
+</div>
+
+<!-- Hash progress -->
+<div class="card hidden" id="hash-progress">
+    <div class="flex items-center gap-2">
+        <strong>Computing Hashes...</strong>
+        <span id="hash-file" class="text-muted text-sm"></span>
+        <button id="btn-hash-stop" onclick="stopHash()" style="margin-left:auto" class="btn-danger">Stop</button>
+    </div>
+    <div class="progress-bar mt-2">
+        <div class="fill" id="hash-bar" style="width: 0%"></div>
+    </div>
+    <div class="text-sm text-muted mt-2" id="hash-detail"></div>
 </div>
 
 <!-- Files table -->
@@ -46,27 +64,6 @@
 
 <div class="pagination" id="pagination"></div>
 
-<!-- Perceptual hash modal -->
-<div id="hash-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center;">
-    <div class="card" style="min-width:360px; max-width:480px; margin:0;">
-        <h3 style="margin-bottom:16px;">Compute Perceptual Hashes</h3>
-        <label style="display:block; margin-bottom:8px; color:#8b949e; font-size:13px;">Scope</label>
-        <select id="hash-dir-select" style="width:100%; margin-bottom:16px;">
-            <option value="">All configured directories</option>
-        </select>
-        <div id="hash-progress-area" style="display:none; margin-bottom:16px;">
-            <div style="font-size:13px; color:#8b949e; margin-bottom:4px;">
-                <span id="hash-progress-label">Starting…</span>
-            </div>
-            <div class="progress-bar"><div class="fill" id="hash-progress-fill" style="width:0%"></div></div>
-        </div>
-        <div style="display:flex; gap:8px; justify-content:flex-end;">
-            <button type="button" id="btn-hash-cancel" class="btn-secondary">Cancel</button>
-            <button type="button" id="btn-hash-stop" class="btn-danger" style="display:none;">Stop</button>
-            <button type="button" id="btn-hash-start">Start</button>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
@@ -329,71 +326,87 @@ async function loadHashConfig() {
     try {
         const res = await fetch('/api/config');
         const cfg = await res.json();
-        if (cfg.hashing && cfg.hashing.phash) {
-            document.getElementById('hash-toolbar').style.display = '';
-            const sel = document.getElementById('hash-dir-select');
-            (cfg.scan_dirs || []).forEach(dir => {
-                const opt = document.createElement('option');
-                opt.value = dir; opt.textContent = dir;
-                sel.appendChild(opt);
-            });
-        }
+        if (!(cfg.hashing && cfg.hashing.phash)) return;
+        document.getElementById('hash-toolbar').style.display = '';
+        const list = document.getElementById('hash-dir-list');
+        list.replaceChildren();
+        (cfg.scan_dirs || []).forEach(dir => {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding:4px 12px; cursor:pointer;';
+            item.textContent = dir;
+            item.onmouseenter = () => item.style.background = '#21262d';
+            item.onmouseleave = () => item.style.background = '';
+            item.onclick = () => triggerHash([dir]);
+            list.appendChild(item);
+        });
     } catch(e) {}
 }
 
-document.getElementById('btn-hash').onclick = () => {
-    document.getElementById('hash-modal').style.display = 'flex';
-    document.getElementById('hash-progress-area').style.display = 'none';
-    document.getElementById('btn-hash-start').style.display = '';
-    document.getElementById('btn-hash-stop').style.display = 'none';
+document.getElementById('btn-hash').onclick = () => triggerHash();
+document.getElementById('btn-hash-menu').onclick = () => {
+    document.getElementById('hash-menu').classList.toggle('hidden');
 };
+document.addEventListener('click', e => {
+    const toolbar = document.getElementById('hash-toolbar');
+    if (toolbar && !toolbar.contains(e.target)) {
+        document.getElementById('hash-menu').classList.add('hidden');
+    }
+});
 
-document.getElementById('btn-hash-cancel').onclick = () => {
-    clearInterval(hashPollInterval);
-    document.getElementById('hash-modal').style.display = 'none';
-};
-
-document.getElementById('btn-hash-start').onclick = async () => {
-    const dir = document.getElementById('hash-dir-select').value;
-    const body = dir ? { scan_dirs: [dir] } : {};
+async function triggerHash(scanDirs) {
+    document.getElementById('btn-hash').disabled = true;
+    document.getElementById('hash-menu').classList.add('hidden');
+    const opts = { method: 'POST' };
+    if (scanDirs) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify({ scan_dirs: scanDirs });
+    }
     try {
-        const res = await fetch('/api/hash', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-            const err = await res.json();
-            alert(err.error || 'Failed to start');
-            return;
+        const res = await fetch('/api/hash', opts);
+        if (res.ok) {
+            startHashPoll();
+        } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to start hashing');
+            document.getElementById('btn-hash').disabled = false;
         }
-        document.getElementById('btn-hash-start').style.display = 'none';
-        document.getElementById('btn-hash-stop').style.display = '';
-        document.getElementById('hash-progress-area').style.display = '';
-        hashPollInterval = setInterval(pollHashProgress, 1500);
-    } catch(e) { alert('Request failed'); }
-};
+    } catch(e) {
+        alert('Failed to start hashing');
+        document.getElementById('btn-hash').disabled = false;
+    }
+}
 
-document.getElementById('btn-hash-stop').onclick = async () => {
-    await fetch('/api/hash/stop', { method: 'POST' });
-};
-
-async function pollHashProgress() {
+async function stopHash() {
+    const btn = document.getElementById('btn-hash-stop');
+    btn.disabled = true;
+    btn.textContent = 'Stopping...';
     try {
-        const res = await fetch('/api/hash/status');
-        const d = await res.json();
-        document.getElementById('hash-progress-fill').style.width = d.percent + '%';
-        document.getElementById('hash-progress-label').textContent =
-            d.running
-                ? `${d.processed} / ${d.total} processed, ${d.written} hashed (${d.percent}%)`
-                : `Done — ${d.written} of ${d.total} files hashed`;
-        if (!d.running) {
-            clearInterval(hashPollInterval);
-            document.getElementById('btn-hash-stop').style.display = 'none';
-            document.getElementById('btn-hash-start').style.display = '';
-            fetchFiles();
-        }
-    } catch(e) {}
+        await fetch('/api/hash/stop', { method: 'POST' });
+    } catch(e) { console.error('Failed to stop hash job', e); }
+}
+
+function startHashPoll() {
+    const prog = document.getElementById('hash-progress');
+    prog.classList.remove('hidden');
+    hashPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/hash/status');
+            const d = await res.json();
+            document.getElementById('hash-bar').style.width = d.percent + '%';
+            document.getElementById('hash-file').textContent = d.current_file;
+            document.getElementById('hash-detail').textContent =
+                `${d.processed} / ${d.total} processed, ${d.written} hashed`;
+            if (!d.running) {
+                clearInterval(hashPollInterval);
+                prog.classList.add('hidden');
+                document.getElementById('btn-hash').disabled = false;
+                const stopBtn = document.getElementById('btn-hash-stop');
+                stopBtn.disabled = false;
+                stopBtn.textContent = 'Stop';
+                fetchFiles();
+            }
+        } catch(e) { console.error('Hash poll failed', e); }
+    }, 1500);
 }
 
 document.getElementById('nav-vr').classList.add('active');
