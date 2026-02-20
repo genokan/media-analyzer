@@ -6,6 +6,8 @@ dist/
 build/
 *.egg
 media_analyzer/_version.py
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -30,6 +32,9 @@ Thumbs.db
 
 # Worktrees
 .worktrees/
+
+# Claude Code artifacts (plans, local state)
+.claude/
 
 #playwright 
 .playwright-mcp/

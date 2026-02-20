@@ -20,6 +20,7 @@ def app(tmp_path):
             "video": [".mp4", ".mkv"],
             "audio": [".mp3", ".flac"],
         },
+        "hashing": {"workers": 1, "phash": False},
     }
     app = create_app(config)
     app.config["TESTING"] = True
@@ -211,6 +212,39 @@ class TestScanAPI:
         assert data["running"] is False
 
 
+class TestHashAPI:
+    def test_hash_status_not_running(self, client):
+        res = client.get("/api/hash/status")
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["running"] is False
+
+    def test_hash_status_shape(self, client):
+        res = client.get("/api/hash/status")
+        data = res.get_json()
+        assert "running" in data
+        assert "total" in data
+        assert "processed" in data
+        assert "percent" in data
+
+    def test_hash_start_returns_started(self, client):
+        from unittest.mock import patch
+
+        with patch("media_analyzer.server.api.run_phash_job", return_value=0):
+            res = client.post("/api/hash", json={})
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["status"] == "started"
+
+    def test_hash_start_rejects_invalid_dirs(self, client):
+        res = client.post("/api/hash", json={"scan_dirs": ["/not/configured"]})
+        assert res.status_code == 400
+
+    def test_hash_stop_when_not_running(self, client):
+        res = client.post("/api/hash/stop")
+        assert res.status_code == 409
+
+
 class TestAuth:
     def test_no_auth_when_no_token(self, client):
         # No secret_token configured, all requests pass
@@ -225,6 +259,7 @@ class TestAuth:
             "secret_token": "test-secret-123",
             "_flask_secret": "flask-secret",
             "file_extensions": {"video": [], "audio": []},
+            "hashing": {"workers": 1, "phash": False},
         }
         app = create_app(config)
         app.config["TESTING"] = True
@@ -246,6 +281,7 @@ class TestAuth:
             "secret_token": "test-secret-123",
             "_flask_secret": "flask-secret",
             "file_extensions": {"video": [], "audio": []},
+            "hashing": {"workers": 1, "phash": False},
         }
         app = create_app(config)
         app.config["TESTING"] = True
@@ -262,6 +298,7 @@ class TestAuth:
             "secret_token": "correct-token",
             "_flask_secret": "flask-secret",
             "file_extensions": {"video": [], "audio": []},
+            "hashing": {"workers": 1, "phash": False},
         }
         app = create_app(config)
         app.config["TESTING"] = True

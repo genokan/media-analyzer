@@ -1,6 +1,7 @@
 """CLI entry point for media_analyzer."""
 
 import argparse
+import logging
 import sys
 
 from media_analyzer.config import generate_secret_token, load_config, save_config, validate_config
@@ -34,6 +35,12 @@ def main():
     )
 
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     from pathlib import Path
 

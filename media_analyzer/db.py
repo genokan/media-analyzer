@@ -76,6 +76,13 @@ CREATE INDEX IF NOT EXISTS idx_media_files_type ON media_files(media_type);
 CREATE INDEX IF NOT EXISTS idx_media_files_path ON media_files(file_path);
 """
 
+# Additive migrations applied on every startup. Safe to run on existing DBs.
+_MIGRATION_SQL = [
+    "ALTER TABLE media_files ADD COLUMN quick_hash TEXT",
+    "ALTER TABLE media_files ADD COLUMN video_phash TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_media_files_quick_hash ON media_files(quick_hash)",
+]
+
 
 class Database:
     def __init__(self, db_path: str):
@@ -93,6 +100,15 @@ class Database:
     def _init_schema(self):
         with self._connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._migrate_schema(conn)
+
+    def _migrate_schema(self, conn: sqlite3.Connection):
+        """Apply additive schema migrations. Safe to run on existing databases."""
+        for sql in _MIGRATION_SQL:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # column or index already exists
 
     # --- Upsert ---
 
@@ -274,13 +290,69 @@ class Database:
     # --- Queries ---
 
     def file_unchanged(self, file_path: str, file_size: int, modified_date: str) -> bool:
-        """Check if a file already exists with matching size and modified date."""
+        """Check if a file is already scanned, unchanged, and has a quick_hash."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM media_files WHERE file_path=? AND file_size=? AND modified_date=?",
+                """SELECT 1 FROM media_files
+                   WHERE file_path=? AND file_size=? AND modified_date=?
+                   AND quick_hash IS NOT NULL""",
                 (file_path, file_size, modified_date),
             ).fetchone()
             return row is not None
+
+    def file_needs_hash_only(self, file_path: str, file_size: int, modified_date: str) -> bool:
+        """True if file exists with matching stats but has no quick_hash yet."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT 1 FROM media_files
+                   WHERE file_path=? AND file_size=? AND modified_date=?
+                   AND quick_hash IS NULL""",
+                (file_path, file_size, modified_date),
+            ).fetchone()
+            return row is not None
+
+    def upsert_quick_hash(self, file_id: int, quick_hash: str):
+        """Store the quick hash for a file by ID."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE media_files SET quick_hash=? WHERE id=?",
+                (quick_hash, file_id),
+            )
+
+    def upsert_quick_hash_by_path(self, file_path: str, quick_hash: str):
+        """Store the quick hash for a file by path (used for hash-only updates)."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE media_files SET quick_hash=? WHERE file_path=?",
+                (quick_hash, file_path),
+            )
+
+    def upsert_video_phash(self, file_id: int, video_phash: str):
+        """Store the perceptual hash for a video file."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE media_files SET video_phash=? WHERE id=?",
+                (video_phash, file_id),
+            )
+
+    def get_unhashed_videos(self, scan_dirs: list[str] | None = None) -> list[dict]:
+        """Return video/VR files missing a perceptual hash, optionally scoped to dirs."""
+        with self._connect() as conn:
+            if scan_dirs:
+                placeholders = " OR ".join("file_path LIKE ?" for _ in scan_dirs)
+                params = [d.rstrip("/") + "/%" for d in scan_dirs]
+                rows = conn.execute(
+                    f"""SELECT id, file_path, duration FROM media_files
+                        WHERE media_type IN ('video', 'vr') AND video_phash IS NULL
+                        AND ({placeholders})""",
+                    params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT id, file_path, duration FROM media_files
+                       WHERE media_type IN ('video', 'vr') AND video_phash IS NULL"""
+                ).fetchall()
+            return [dict(r) for r in rows]
 
     def list_files(
         self,

@@ -12,16 +12,20 @@ requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "pyyaml>=6.0",
+    "imagehash>=4.3",
+    "Pillow>=10.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=5.0",
     "ruff>=0.4",
 ]
 
 [tool.hatch.version]
 source = "vcs"
+raw-options = {git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*", "--exclude", "v*-*"], fallback_version = "0.0.0.dev0"}
 
 [tool.hatch.build.hooks.vcs]
 version-file = "media_analyzer/_version.py"

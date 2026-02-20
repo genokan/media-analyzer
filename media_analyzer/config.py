@@ -18,6 +18,10 @@ DEFAULT_CONFIG = {
         "video": [".mp4", ".mkv", ".avi", ".mov", ".m4v"],
         "audio": [".mp3", ".aac", ".flac", ".wav", ".ogg", ".wma", ".m4a", ".opus"],
     },
+    "hashing": {
+        "workers": min(4, os.cpu_count() or 1),
+        "phash": False,
+    },
 }
 
 

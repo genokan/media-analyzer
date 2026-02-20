@@ -28,6 +28,27 @@
         <button class="btn-secondary" id="btn-columns" type="button">Columns</button>
         <div class="col-toggle-menu" id="col-menu"></div>
     </div>
+    <div id="hash-toolbar" style="display:none;" class="scan-split">
+        <button type="button" id="btn-hash">Compute Hashes</button>
+        <button type="button" id="btn-hash-menu" title="Hash a specific directory">&#9662;</button>
+        <div id="hash-menu" class="hidden" style="position:absolute; right:0; top:100%; background:#161b22; border:1px solid #30363d; border-radius:6px; min-width:250px; z-index:10; padding:4px 0; margin-top:4px;">
+            <div class="text-sm text-muted" style="padding:6px 12px;">Hash specific directory:</div>
+            <div id="hash-dir-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Hash progress -->
+<div class="card hidden" id="hash-progress">
+    <div class="flex items-center gap-2">
+        <strong>Computing Hashes...</strong>
+        <span id="hash-file" class="text-muted text-sm"></span>
+        <button id="btn-hash-stop" onclick="stopHash()" style="margin-left:auto" class="btn-danger">Stop</button>
+    </div>
+    <div class="progress-bar mt-2">
+        <div class="fill" id="hash-bar" style="width: 0%"></div>
+    </div>
+    <div class="text-sm text-muted mt-2" id="hash-detail"></div>
 </div>
 
 <!-- Files table -->
@@ -41,20 +62,23 @@
 </div>
 
 <div class="pagination" id="pagination"></div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 const COLUMNS = [
-    { key: 'filename',    label: 'Filename',    sort: 'filename',  default: true },
-    { key: 'resolution',  label: 'Resolution',  sort: null,        default: true },
-    { key: 'codec',       label: 'Codec',       sort: null,        default: true },
-    { key: 'frame_rate',  label: 'Frame Rate',  sort: null,        default: true },
-    { key: 'bitrate',     label: 'Bitrate',     sort: 'bitrate',   default: true },
-    { key: 'bpp',         label: 'Bitrate/px',  sort: null,        default: false },
-    { key: 'audio_codec', label: 'Audio Codec', sort: null,        default: false },
-    { key: 'duration',    label: 'Duration',    sort: 'duration',  default: true },
-    { key: 'file_size',   label: 'Size',        sort: 'file_size', default: true },
+    { key: 'filename',    label: 'Filename',         sort: 'filename',  default: true },
+    { key: 'resolution',  label: 'Resolution',       sort: null,        default: true },
+    { key: 'codec',       label: 'Codec',            sort: null,        default: true },
+    { key: 'frame_rate',  label: 'Frame Rate',       sort: null,        default: true },
+    { key: 'bitrate',     label: 'Bitrate',          sort: 'bitrate',   default: true },
+    { key: 'bpp',         label: 'Bitrate/px',       sort: null,        default: false },
+    { key: 'audio_codec', label: 'Audio Codec',      sort: null,        default: false },
+    { key: 'duration',    label: 'Duration',         sort: 'duration',  default: true },
+    { key: 'file_size',   label: 'Size',             sort: 'file_size', default: true },
+    { key: 'quick_hash',  label: 'Quick Hash',       sort: null,        default: false },
+    { key: 'video_phash', label: 'Perceptual Hash',  sort: null,        default: false },
 ];
 
 const STORAGE_KEY = 'media-analyzer-video-cols';
@@ -146,6 +170,16 @@ function cellValue(f, key) {
         case 'audio_codec': return { text: f.audio_codec || '-' };
         case 'duration':    return { text: formatDuration(f.duration) };
         case 'file_size':   return { text: formatSize(f.file_size) };
+        case 'quick_hash': {
+            if (!f.quick_hash) return { text: '—' };
+            const short = f.quick_hash.substring(0, 12) + '…';
+            return { text: short, title: f.quick_hash };
+        }
+        case 'video_phash': {
+            if (!f.video_phash) return { text: '—' };
+            const short = f.video_phash.substring(0, 16) + '…';
+            return { text: short, title: f.video_phash };
+        }
         default:            return { text: '-' };
     }
 }
@@ -279,9 +313,100 @@ document.addEventListener('click', e => {
     if (!toggle.contains(e.target)) document.getElementById('col-menu').classList.remove('open');
 });
 
+// --- Perceptual hash UI ---
+let hashPollInterval = null;
+
+async function loadHashConfig() {
+    try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        if (!(cfg.hashing && cfg.hashing.phash)) return;
+        document.getElementById('hash-toolbar').style.display = '';
+        const list = document.getElementById('hash-dir-list');
+        list.replaceChildren();
+        (cfg.scan_dirs || []).forEach(dir => {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding:4px 12px; cursor:pointer;';
+            item.textContent = dir;
+            item.onmouseenter = () => item.style.background = '#21262d';
+            item.onmouseleave = () => item.style.background = '';
+            item.onclick = () => triggerHash([dir]);
+            list.appendChild(item);
+        });
+    } catch(e) {}
+}
+
+document.getElementById('btn-hash').onclick = () => triggerHash();
+document.getElementById('btn-hash-menu').onclick = () => {
+    document.getElementById('hash-menu').classList.toggle('hidden');
+};
+document.addEventListener('click', e => {
+    const toolbar = document.getElementById('hash-toolbar');
+    if (toolbar && !toolbar.contains(e.target)) {
+        document.getElementById('hash-menu').classList.add('hidden');
+    }
+});
+
+async function triggerHash(scanDirs) {
+    document.getElementById('btn-hash').disabled = true;
+    document.getElementById('hash-menu').classList.add('hidden');
+    const opts = { method: 'POST' };
+    if (scanDirs) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify({ scan_dirs: scanDirs });
+    }
+    try {
+        const res = await fetch('/api/hash', opts);
+        if (res.ok) {
+            startHashPoll();
+        } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to start hashing');
+            document.getElementById('btn-hash').disabled = false;
+        }
+    } catch(e) {
+        alert('Failed to start hashing');
+        document.getElementById('btn-hash').disabled = false;
+    }
+}
+
+async function stopHash() {
+    const btn = document.getElementById('btn-hash-stop');
+    btn.disabled = true;
+    btn.textContent = 'Stopping...';
+    try {
+        await fetch('/api/hash/stop', { method: 'POST' });
+    } catch(e) { console.error('Failed to stop hash job', e); }
+}
+
+function startHashPoll() {
+    const prog = document.getElementById('hash-progress');
+    prog.classList.remove('hidden');
+    hashPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/hash/status');
+            const d = await res.json();
+            document.getElementById('hash-bar').style.width = d.percent + '%';
+            document.getElementById('hash-file').textContent = d.current_file;
+            document.getElementById('hash-detail').textContent =
+                `${d.processed} / ${d.total} processed, ${d.written} hashed`;
+            if (!d.running) {
+                clearInterval(hashPollInterval);
+                prog.classList.add('hidden');
+                document.getElementById('btn-hash').disabled = false;
+                const stopBtn = document.getElementById('btn-hash-stop');
+                stopBtn.disabled = false;
+                stopBtn.textContent = 'Stop';
+                fetchFiles();
+            }
+        } catch(e) { console.error('Hash poll failed', e); }
+    }, 1500);
+}
+
 document.getElementById('nav-videos').classList.add('active');
 buildColumnMenu();
 renderHeader();
+loadHashConfig();
 fetchFiles();
 </script>
 {% endblock %}
