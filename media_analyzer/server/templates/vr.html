@@ -385,8 +385,8 @@ async function pollHashProgress() {
         document.getElementById('hash-progress-fill').style.width = d.percent + '%';
         document.getElementById('hash-progress-label').textContent =
             d.running
-                ? `${d.processed} / ${d.total} hashed (${d.percent}%)`
-                : `Done — ${d.processed} files hashed`;
+                ? `${d.processed} / ${d.total} processed, ${d.written} hashed (${d.percent}%)`
+                : `Done — ${d.written} of ${d.total} files hashed`;
         if (!d.running) {
             clearInterval(hashPollInterval);
             document.getElementById('btn-hash-stop').style.display = 'none';

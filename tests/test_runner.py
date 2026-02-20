@@ -37,7 +37,7 @@ class TestJobProgress:
 
         def updater(i):
             try:
-                p.update(i, f"file_{i}.mp4")
+                p.update(i, i, f"file_{i}.mp4")
             except Exception as e:
                 errors.append(e)
 

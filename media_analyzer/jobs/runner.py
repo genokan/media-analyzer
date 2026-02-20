@@ -17,6 +17,7 @@ class JobProgress:
         self._lock = threading.Lock()
         self.total = 0
         self.processed = 0
+        self.written = 0
         self.current_file = ""
         self.running = False
         self.cancel_requested = False
@@ -27,13 +28,15 @@ class JobProgress:
                 "running": self.running,
                 "total": self.total,
                 "processed": self.processed,
+                "written": self.written,
                 "current_file": self.current_file,
                 "percent": round(self.processed / self.total * 100, 1) if self.total else 0,
             }
 
-    def update(self, processed: int, current_file: str):
+    def update(self, processed: int, written: int, current_file: str):
         with self._lock:
             self.processed = processed
+            self.written = written
             self.current_file = current_file
 
 
@@ -62,6 +65,7 @@ class JobRunner:
     ) -> int:
         """Process items in parallel. Returns count of items passed to writer_fn."""
         written = 0
+        processed = 0
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = {executor.submit(worker_fn, item): item for item in items}
             for future in as_completed(futures):
@@ -70,7 +74,9 @@ class JobRunner:
                 if progress.cancel_requested:
                     for f in futures:
                         f.cancel()
-                    logger.info("Job cancelled after %d written items", written)
+                    logger.info(
+                        "Job cancelled: %d/%d processed, %d written", processed, len(items), written
+                    )
                     break
 
                 try:
@@ -88,7 +94,8 @@ class JobRunner:
                         name = item[0] if isinstance(item, tuple) else str(item)
                         logger.exception("Writer failed for: %s", name)
 
+                processed += 1
                 name = item[0] if isinstance(item, tuple) else str(item)
-                progress.update(written, os.path.basename(str(name)))
+                progress.update(processed, written, os.path.basename(str(name)))
 
         return written
