@@ -57,6 +57,15 @@
     <p class="text-sm text-muted mt-2">Changes take effect after restart.</p>
 </div>
 
+<!-- Hashing -->
+<div class="card">
+    <h3 class="mb-2">Hashing</h3>
+    <div class="flex items-center gap-2">
+        <input type="checkbox" id="cfg-phash">
+        <label for="cfg-phash" class="text-sm">Enable perceptual hashing (shows Compute Hashes button on Videos page)</label>
+    </div>
+</div>
+
 <!-- Token -->
 <div class="card">
     <h3 class="mb-2">API Token</h3>
@@ -106,6 +115,9 @@ function renderConfig() {
     // Server
     document.getElementById('cfg-host').value = config.server?.host || '127.0.0.1';
     document.getElementById('cfg-port').value = config.server?.port || 8080;
+
+    // Hashing
+    document.getElementById('cfg-phash').checked = !!(config.hashing?.phash);
 
     // Token
     document.getElementById('token-status').textContent =
@@ -261,6 +273,9 @@ async function saveConfig() {
         server: {
             host: document.getElementById('cfg-host').value,
             port: parseInt(document.getElementById('cfg-port').value) || 8080,
+        },
+        hashing: {
+            phash: document.getElementById('cfg-phash').checked,
         },
     };
     try {

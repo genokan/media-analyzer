@@ -146,6 +146,11 @@ def update_config():
             config["server"]["host"] = updates["server"]["host"]
         if "port" in updates["server"]:
             config["server"]["port"] = updates["server"]["port"]
+    if "hashing" in updates:
+        if "hashing" not in config:
+            config["hashing"] = {}
+        if "phash" in updates["hashing"]:
+            config["hashing"]["phash"] = bool(updates["hashing"]["phash"])
 
     warnings = validate_config(config)
     config_path = current_app.config.get("MEDIA_ANALYZER_CONFIG_PATH")
